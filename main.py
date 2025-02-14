@@ -1,49 +1,52 @@
+from sklearn.datasets import make_circles
+from sklearn.model_selection import train_test_split
+import pandas as pd
+import matplotlib.pyplot as plt
 import torch
 from torch import nn
-import matplotlib.pyplot as plt
 
-# Create known parameters
+class Classifier(nn.Module):
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.layer_1 = nn.Linear(in_features=2, out_features=5)
+        self.layer_2 = nn.Linear(in_features=5, out_features=1)
+    def forward(self, x):
+        return self.layer_2(self.layer_1(x))
 
-weight = 0.7
-bias = 0.3
+def accuracy_fn(y_true, y_pred):
+    correct = torch.eq(y_true, y_pred).sum().item() # torch.eq() calculates where two tensors are equal
+    acc = (correct / len(y_pred)) * 100
+    return acc
 
-start = 0
-end = 1
-step = 0.02
-X = torch.arange(start, end, step).unsqueeze(dim=1)
-y = weight * X + bias
+n_samples = 1000
 
-train_split = int(0.8 * len(X))
-X_train, y_train = X[:train_split], y[:train_split]
-X_test, y_test = X[train_split:], y[train_split:]
+X, y = make_circles(n_samples, noise=0.03, random_state=42)
 
-def plot_predictions(train_data=X_train, 
-                     train_labels=y_train, 
-                     test_data=X_test, 
-                     test_labels=y_test, 
-                     predictions=None):
-    plt.figure(figsize=(10, 7))
+circles = pd.DataFrame({"X1": X[:, 0], # type: ignore
+                        "X2": X[:, 1], #type: ignore
+    "label": y
+})
 
-    # Plot the training data in blue
-    plt.scatter(train_data, train_labels, c="b", s=4, label="Training data")
+X = torch.from_numpy(X).type(torch.float)
+y = torch.from_numpy(y).type(torch.float)
 
-    # Plot the testing data in green
-    plt.scatter(test_data, test_labels, c="g", s=4, label="Testing data")
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    if predictions is not None:
-        plt.scatter(test_data, predictions, c="r", s=4, label="Predictions")
+model_0 = Classifier()
 
-    plt.legend(prop={"size":14})
+untrained_preds = model_0(X_test)
 
-    plt.show()
+loss_fn = nn.BCEWithLogitsLoss()
 
+optimizer = torch.optim.SGD(params=model_0.parameters(), lr=0.01)
 
-class LinearRegressionModel(nn.Module):
-    def __init__(self):
-        super().__init__()
+y_logits = model_0(X_test)[:5]
 
-        self.weights = nn.Parameter(torch.randn(1, dtype=torch.float), requires_grad=True)
-        self.bias = nn.Parameter(torch.randn(1, dtype=torch.float), requires_grad=True)
+y_pred_probs = torch.sigmoid(y_logits)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.weights * x + self.bias
+y_preds = torch.round(y_pred_probs)
+y_pred_labels = torch.round(torch.sigmoid(model_0(X_test)[:5]))
+
+print(torch.eq(y_preds.squeeze(), y_pred_labels.squeeze()))
+
+print(y_preds.squeeze())
