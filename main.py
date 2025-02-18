@@ -1,85 +1,132 @@
-# Code for creating a spiral dataset from CS231n
-import numpy as np
-import matplotlib.pyplot as plt
 import torch
-from torch import from_numpy, nn
-from sklearn.model_selection import train_test_split
-from helper_functions import plot_decision_boundary
 
-RANDOM_STATE = 42
+from torch import nn
 
-N = 100 # number of points per class
-D = 2 # dimensionality
-K = 3 # number of classes
-X = np.zeros((N*K,D)) # data matrix (each row = single example)
-y = np.zeros(N*K, dtype='uint8') # class labels
-for j in range(K):
-  ix = range(N*j,N*(j+1))
-  r = np.linspace(0.0,1,N) # radius
-  t = np.linspace(j*4,(j+1)*4,N) + np.random.randn(N)*0.2 # theta
-  X[ix] = np.c_[r*np.sin(t), r*np.cos(t)]
-  y[ix] = j
+import torchvision
+from torchvision import datasets
+from torchvision.transforms import ToTensor
+from torch.utils.data import DataLoader
 
-X = torch.from_numpy(X).type(torch.float)
-y = torch.from_numpy(y).type(torch.LongTensor)
+import matplotlib.pyplot as plt
+from helper_functions import accuracy_fn
 
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=RANDOM_STATE)
+from timeit import default_timer as timer
+from tqdm.auto import tqdm
 
-class SpiralClassificationModel(nn.Module):
-    def __init__(self, dimensionality, num_classes) -> None:
+torch.manual_seed(42)
+
+def print_train_time(start: float, end: float, device: torch.device):
+    """Prints difference between start and end time.
+
+    Args:
+        start (float): Start time of computation (preferred in timeit format). 
+        end (float): End time of computation.
+        device ([type], optional): Device that compute is running on. Defaults to None.
+
+    Returns:
+        float: time between start and end in seconds (higher is longer).
+    """
+    total_time = end - start
+    print(f"Train time on {device}: {total_time:.3f} seconds")
+    return total_time
+
+train_data = datasets.FashionMNIST(
+    root="data",
+    train=True,
+    download=True,
+    transform=ToTensor(),
+    target_transform=None
+)
+
+test_data = datasets.FashionMNIST(
+    root="data",
+    train=False,
+    download=True,
+    transform=ToTensor()
+)
+
+class_names = train_data.classes
+
+fig = plt.figure(figsize=(9, 9))
+rows, cols = 4, 4
+
+# for i in range(1, rows * cols + 1):
+#     random_idx = torch.randint(0, len(train_data), size=[1]).item()
+#     img, label = train_data[random_idx] #pyright: ignore
+#     fig.add_subplot(rows, cols, i)
+#     plt.imshow(img.squeeze(), cmap="gray")
+#     plt.title(class_names[label])
+#     plt.axis(False)
+#
+# plt.show()
+
+BATCH_SIZE = 32
+
+train_dataloader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True)
+test_dataloader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False)
+
+
+class FashionMNISTModel(nn.Module):
+    def __init__(self, input_shape: int, hidden_units: int, output_shape: int):
         super().__init__()
-        self.layer1 = nn.Linear(in_features=dimensionality, out_features=10)
-        self.layer2 = nn.Linear(in_features=10, out_features=10)
-        self.layer3 = nn.Linear(in_features=10, out_features=num_classes)
-        self.relu = nn.ReLU()
-
+        self.layer_stack = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(in_features=input_shape, out_features=hidden_units),
+            nn.ReLU(),
+            nn.Linear(in_features=hidden_units, out_features=output_shape),
+            nn.ReLU()
+        )
     def forward(self, x):
-        return self.layer3(self.relu(self.layer2(self.relu(self.layer1(x)))))
+        return self.layer_stack(x)
 
-def accuracy_fn(y_true, y_pred):
-    correct = torch.eq(y_true, y_pred).sum().item() # torch.eq() calculates where two tensors are equal
-    acc = (correct / len(y_pred)) * 100 
-    return acc
-
-model = SpiralClassificationModel(D, K)
+model_0 = FashionMNISTModel(input_shape=784, hidden_units=10, output_shape=len(class_names))
 
 loss_fn = nn.CrossEntropyLoss()
-optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+optimizer = torch.optim.SGD(params=model_0.parameters(), lr=0.1)
 
-epochs = 4000
+train_time_start_on_cpu = timer()
 
-for epoch in range(epochs):
+epochs = 3
 
-    # Put the model in training mode
-    model.train()
+for epoch in tqdm(range(epochs)):
+    print(f"Epoch: {epoch}\n...")
 
-    train_logits = model(X_train)
-    train_results = torch.softmax(train_logits, dim=1).argmax(dim=1)
+    train_loss = 0
+    for batch, (X, y) in enumerate(train_dataloader):
+        model_0.train()
 
-    loss = loss_fn(train_logits, y_train)
-    acc = accuracy_fn(y_true=y_train, y_pred=train_results)
+        y_pred = model_0(X)
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+        loss = loss_fn(y_pred, y)
+        train_loss += loss
 
-    model.eval()
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        if batch % 400 == 0:
+            print(f"Looked at {batch * len(X)} / {len(train_dataloader.dataset)} samples") #pyright: ignore
+
+    train_loss /= len(train_dataloader)
+
+    test_loss, test_acc = 0, 0
+    model_0.eval()
+
     with torch.inference_mode():
+        for X, y in test_dataloader:
+            test_pred = model_0(X)
 
-        test_logits = model(X_test)
-        test_probs = torch.softmax(test_logits, dim=1).argmax(dim=1)
+            test_loss += loss_fn(test_pred, y)
 
-        test_loss = loss_fn(test_logits, y_test)
-        test_acc = accuracy_fn(y_true=y_test, y_pred=test_probs)
+            test_acc += accuracy_fn(y_true=y, y_pred=test_pred.argmax(dim=1))
 
-        if epoch % 10 == 0:
-            print(f"epoch: {epoch} | train loss: {loss}, train accuracy: {acc} | test loss: {test_loss}, test accuracy: {test_acc}")
+        test_loss /= len(test_dataloader)
+        test_acc /= len(test_dataloader)
 
-plt.figure(figsize=(12, 6))
-plt.subplot(1, 2, 1)
-plt.title("Train")
-plot_decision_boundary(model, X_train, y_train)
-plt.subplot(1, 2, 2)
-plt.title("Test")
-plot_decision_boundary(model, X_test, y_test)
-plt.show()
+    print(f"\nTrain loss: {train_loss:.5f} | Test loss: {test_loss:.5f}, Test acc: {test_acc:.2f}%\n")
+
+train_end_time_on_cpu = timer()
+
+total_train_time_model_0 = print_train_time(start=train_time_start_on_cpu, 
+                                           end=train_end_time_on_cpu,
+                                            device="cpu") #pyright: ignore
