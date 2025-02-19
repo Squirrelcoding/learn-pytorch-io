@@ -30,6 +30,27 @@ def print_train_time(start: float, end: float, device: torch.device):
     print(f"Train time on {device}: {total_time:.3f} seconds")
     return total_time
 
+def eval_model(model: torch.nn.Module,
+               data_loader: torch.utils.data.DataLoader,
+               loss_fn: torch.nn.Module,
+               accuracy_fn):
+    loss, acc = 0, 0
+    model.eval()
+    with torch.inference_mode():
+        for X, y in data_loader:
+            test_pred = model(X)
+
+            loss += loss_fn(test_pred, y)
+            acc += accuracy_fn(y_true=y, y_pred=test_pred.argmax(dim=1))
+
+        loss /= len(data_loader)
+        acc /= len(data_loader)
+    return {
+        "model_name": model.__class__.__name__,
+        "model_loss": loss,
+        "model_acc": acc
+    }
+
 train_data = datasets.FashionMNIST(
     root="data",
     train=True,
@@ -130,3 +151,4 @@ train_end_time_on_cpu = timer()
 total_train_time_model_0 = print_train_time(start=train_time_start_on_cpu, 
                                            end=train_end_time_on_cpu,
                                             device="cpu") #pyright: ignore
+
