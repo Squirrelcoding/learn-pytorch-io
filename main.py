@@ -8,7 +8,10 @@ import torchvision
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 
+import matplotlib
 import matplotlib.pyplot as plt
+
+matplotlib.use('Agg')
 
 # Calculate accuracy (a classification metric)
 def accuracy_fn(y_true, y_pred):
@@ -98,7 +101,7 @@ model = MNISTModel(input_shape=1, hidden_units=10, output_shape=len(class_names)
 loss_fn = nn.CrossEntropyLoss()
 optimizer = torch.optim.SGD(params=model.parameters(), lr=0.1)
 
-epochs = 0
+epochs = 3
 
 for epoch in range(epochs):
     train_loss = 0
@@ -116,6 +119,7 @@ for epoch in range(epochs):
         optimizer.step()
 
         if batch % 400 == 0:
+            print(X.shape)
             print(f"Looked at {batch * len(X)} /{len(train_dataloader.dataset)} samples") #pyright: ignore
 
     train_loss /= len(train_dataloader)
@@ -148,12 +152,18 @@ rows, cols = 4, 4
 model.eval()
 
 with torch.inference_mode():
-
-
     for i in range(1, rows * cols + 1):
         random_idx = torch.randint(0, len(test_data), size=[1]).item()
-        img, label = test_data[random_idx] #pyright: ignore
+        img, label = test_dataloader.dataset[random_idx] #pyright: ignore
+
+        img = torch.unsqueeze(img, dim=0).to(device)
+
+        test_pred = model(img).argmax(dim=1)[0]
+        print(test_pred)
+
+
         fig.add_subplot(rows, cols, i)
-        plt.imshow(img.squeeze(), cmap="gray")
-        plt.title(class_names[label])
+        plt.imshow(img.cpu().squeeze(), cmap="gray")
+        plt.title(test_pred)
         plt.axis(False);
+plt.savefig("result.png")
